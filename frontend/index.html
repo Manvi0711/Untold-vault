@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Secret Vault</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    :root {
+      --bg: #f6f1ec;
+      --card: #ffffff;
+      --text: #2e2a27;
+      --muted: #8a817c;
+      --gold: #c8b37e;
+      --border: rgba(200,179,126,0.35);
+      --shadow: 0 20px 60px rgba(0,0,0,0.08);
+    }
+
+    body.dark {
+      --bg: #2b2623;
+      --card: #332d2a;
+      --text: #f4efe9;
+      --muted: #b8afa7;
+      --gold: #d6c28b;
+      --border: rgba(214,194,139,0.35);
+      --shadow: 0 30px 80px rgba(0,0,0,0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Inter", "Helvetica Neue", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.4s ease, color 0.4s ease;
+    }
+
+    .vault {
+      background: var(--card);
+      width: 100%;
+      max-width: 420px;
+      padding: 42px;
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      position: relative;
+    }
+
+    .toggle {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    h1 {
+      font-family: "Playfair Display", Georgia, serif;
+      font-size: 28px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-align: center;
+      margin-bottom: 28px;
+      color: var(--text);
+    }
+
+    textarea,
+    input {
+      width: 100%;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      font-size: 14px;
+      transition: border 0.3s ease;
+    }
+
+    textarea {
+      height: 120px;
+      resize: none;
+    }
+
+    textarea:focus,
+    input:focus {
+      outline: none;
+      border-color: var(--gold);
+    }
+
+    label {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display: block;
+    }
+
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 10px;
+      border-radius: 16px;
+      border: none;
+      background: var(--gold);
+      color: #1c1917;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      opacity: 0.9;
+    }
+
+    .result {
+      margin-top: 22px;
+      font-size: 13px;
+      color: var(--muted);
+      text-align: center;
+      word-break: break-word;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="vault">
+<div class="toggle" onclick="toggleTheme()">🌤️  🌙</div>
+
+    <h1>Secret Vault</h1>
+
+    <div id="content">
+      <textarea id="message" placeholder="Write something meant for only one soul..."></textarea>
+
+      <input id="password" type="password" placeholder="Set a password" />
+
+      <label>Expiry date</label>
+      <input id="expiry" type="date" />
+
+      <button onclick="createSecret()">Create Secret</button>
+
+      <div class="result" id="result"></div>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const secretId = params.get("id");
+    const content = document.getElementById("content");
+
+    function toggleTheme() {
+      document.body.classList.toggle("dark");
+    }
+
+    if (secretId) {
+      content.innerHTML = `
+        <input id="unlockPassword" type="password" placeholder="Enter password" />
+        <button onclick="unlockSecret()">Unlock Secret</button>
+        <div class="result" id="result"></div>
+      `;
+    }
+
+    async function createSecret() {
+      const text = document.getElementById("message").value;
+      const password = document.getElementById("password").value;
+      const expiry = document.getElementById("expiry").value;
+
+      if (!text || !password) {
+        alert("Message and password are required.");
+        return;
+      }
+
+      const res = await fetch("/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          password,
+          expiresAt: expiry || null
+        })
+      });
+
+      const data = await res.json();
+
+      document.getElementById("result").innerText =
+        "Your private link:\n" +
+        window.location.origin +
+        "/?id=" +
+        data.id;
+    }
+
+    async function unlockSecret() {
+      const password = document.getElementById("unlockPassword").value;
+
+      const res = await fetch("/read/" + secretId, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+
+      const text = await res.text();
+      document.getElementById("result").innerText = text;
+    }
+  </script>
+</body>
+</html>
