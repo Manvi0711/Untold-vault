@@ -1,123 +1,118 @@
 const express = require("express");
 const mongoose = require("mongoose");
+const cors = require("cors");
 const CryptoJS = require("crypto-js");
 const path = require("path");
 require("dotenv").config();
 
 const app = express();
 
-/* ======================
+/* =======================
    MIDDLEWARE
-====================== */
+======================= */
+app.use(cors());
 app.use(express.json());
 
-/* ======================
-   SERVE FRONTEND
-====================== */
-const FRONTEND_PATH = path.join(__dirname, "..", "frontend");
-
-app.use(express.static(FRONTEND_PATH));
-
-app.get("/", (req, res) => {
-  res.sendFile(path.join(FRONTEND_PATH, "index.html"));
-});
-
-/* ======================
-   DATABASE CONNECTION
-====================== */
+/* =======================
+   DATABASE
+======================= */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected"))
-  .catch((err) => console.error("MongoDB error:", err));
+  .catch((err) => console.error("MongoDB connection error:", err));
 
-/* ======================
+/* =======================
    SCHEMA
-====================== */
+======================= */
 const SecretSchema = new mongoose.Schema({
-  text: String,
-  passwordHash: String,
-  expiresAt: Date
+  content: String,
+  password: String,
+  expiresAt: Date,
 });
 
 const Secret = mongoose.model("Secret", SecretSchema);
 
-/* ======================
-   CREATE SECRET
-====================== */
+/* =======================
+   API ROUTES
+======================= */
+
+// Create secret
 app.post("/create", async (req, res) => {
-  const { text, password, expiresAt } = req.body;
+  try {
+    const { text, password, expiryDate } = req.body;
 
-  if (!text || !password) {
-    return res.status(400).send("Missing text or password");
+    if (!text || !password || !expiryDate) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+    // Encrypt secret
+    const encrypted = CryptoJS.AES.encrypt(
+      text,
+      password
+    ).toString();
+
+    // Expire at END of selected day
+    const expiresAt = new Date(expiryDate);
+    expiresAt.setHours(23, 59, 59, 999);
+
+    const secret = await Secret.create({
+      content: encrypted,
+      password,
+      expiresAt,
+    });
+
+    res.json({ id: secret._id });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create secret" });
   }
-
-  let expiryDate;
-
-  if (expiresAt) {
-    // Set expiry to END of selected day
-    expiryDate = new Date(expiresAt);
-    expiryDate.setHours(23, 59, 59, 999);
-  } else {
-    // Default = 5 years
-    expiryDate = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365 * 5);
-  }
-
-  const encryptedText = CryptoJS.AES.encrypt(text, password).toString();
-  const passwordHash = CryptoJS.SHA256(password).toString();
-
-  const secret = await Secret.create({
-    text: encryptedText,
-    passwordHash,
-    expiresAt: expiryDate
-  });
-
-  res.json({
-    id: secret._id,
-    expiresAt: expiryDate
-  });
 });
 
-/* ======================
-   READ SECRET
-====================== */
-app.post("/read/:id", async (req, res) => {
-  const { password } = req.body;
-  const { id } = req.params;
+// Get secret
+app.post("/get/:id", async (req, res) => {
+  try {
+    const { password } = req.body;
+    const secret = await Secret.findById(req.params.id);
 
-  const secret = await Secret.findById(id);
+    if (!secret) {
+      return res.status(404).json({ error: "Secret not found" });
+    }
 
-  if (!secret) {
-    return res.send("Secret not found or expired");
+    if (new Date() > secret.expiresAt) {
+      await Secret.findByIdAndDelete(req.params.id);
+      return res.status(410).json({ error: "Secret expired" });
+    }
+
+    if (password !== secret.password) {
+      return res.status(401).json({ error: "Wrong password" });
+    }
+
+    const bytes = CryptoJS.AES.decrypt(secret.content, password);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+
+    res.json({ text: decrypted });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch secret" });
   }
+});
 
-  // Expiry check
-  if (new Date() > secret.expiresAt) {
-    return res.send(
-      `This secret expired on ${secret.expiresAt.toDateString()}`
-    );
-  }
+/* =======================
+   SERVE FRONTEND
+======================= */
 
-  const passwordHash = CryptoJS.SHA256(password).toString();
+// Serve frontend folder
+app.use(express.static(path.join(__dirname, "../frontend")));
 
-  if (passwordHash !== secret.passwordHash) {
-    return res.send("Wrong password");
-  }
-
-  const decryptedText = CryptoJS.AES.decrypt(
-    secret.text,
-    password
-  ).toString(CryptoJS.enc.Utf8);
-
-  res.send(
-    `${decryptedText}\n\n(Expires on ${secret.expiresAt.toDateString()})`
+// Always return frontend for unknown routes
+app.get("*", (req, res) => {
+  res.sendFile(
+    path.join(__dirname, "../frontend/index.html")
   );
 });
 
-/* ======================
+/* =======================
    START SERVER
-====================== */
-const PORT = 5000;
-
+======================= */
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
