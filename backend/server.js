@@ -1,62 +1,43 @@
+require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
-const cors = require("cors");
-const CryptoJS = require("crypto-js");
 const path = require("path");
-require("dotenv").config();
+const cors = require("cors");
 
 const app = express();
+const PORT = process.env.PORT || 5000;
 
-/* =======================
-   MIDDLEWARE
-======================= */
+/* -------------------- Middleware -------------------- */
 app.use(cors());
 app.use(express.json());
 
-/* =======================
-   DATABASE
-======================= */
+/* -------------------- MongoDB -------------------- */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected"))
-  .catch((err) => console.error("MongoDB connection error:", err));
+  .catch((err) => {
+    console.error("MongoDB connection error:", err.message);
+    process.exit(1);
+  });
 
-/* =======================
-   SCHEMA
-======================= */
+/* -------------------- Schema -------------------- */
 const SecretSchema = new mongoose.Schema({
-  content: String,
+  text: String,
   password: String,
   expiresAt: Date,
 });
 
 const Secret = mongoose.model("Secret", SecretSchema);
 
-/* =======================
-   API ROUTES
-======================= */
+/* -------------------- API Routes -------------------- */
 
 // Create secret
 app.post("/create", async (req, res) => {
   try {
-    const { text, password, expiryDate } = req.body;
-
-    if (!text || !password || !expiryDate) {
-      return res.status(400).json({ error: "Missing fields" });
-    }
-
-    // Encrypt secret
-    const encrypted = CryptoJS.AES.encrypt(
-      text,
-      password
-    ).toString();
-
-    // Expire at END of selected day
-    const expiresAt = new Date(expiryDate);
-    expiresAt.setHours(23, 59, 59, 999);
+    const { text, password, expiresAt } = req.body;
 
     const secret = await Secret.create({
-      content: encrypted,
+      text,
       password,
       expiresAt,
     });
@@ -67,8 +48,8 @@ app.post("/create", async (req, res) => {
   }
 });
 
-// Get secret
-app.post("/get/:id", async (req, res) => {
+// Read secret
+app.post("/read/:id", async (req, res) => {
   try {
     const { password } = req.body;
     const secret = await Secret.findById(req.params.id);
@@ -77,42 +58,36 @@ app.post("/get/:id", async (req, res) => {
       return res.status(404).json({ error: "Secret not found" });
     }
 
-    if (new Date() > secret.expiresAt) {
-      await Secret.findByIdAndDelete(req.params.id);
+    if (secret.expiresAt && new Date() > secret.expiresAt) {
+      await Secret.deleteOne({ _id: secret._id });
       return res.status(410).json({ error: "Secret expired" });
     }
 
-    if (password !== secret.password) {
+    if (secret.password !== password) {
       return res.status(401).json({ error: "Wrong password" });
     }
 
-    const bytes = CryptoJS.AES.decrypt(secret.content, password);
-    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+    const text = secret.text;
+    await Secret.deleteOne({ _id: secret._id });
 
-    res.json({ text: decrypted });
+    res.json({ text });
   } catch (err) {
-    res.status(500).json({ error: "Failed to fetch secret" });
+    res.status(500).json({ error: "Failed to read secret" });
   }
 });
 
-/* =======================
-   SERVE FRONTEND
-======================= */
+/* -------------------- Frontend -------------------- */
 
-// Serve frontend folder
-app.use(express.static(path.join(__dirname, "../frontend")));
+// Serve frontend files
+const frontendPath = path.join(__dirname, "../frontend");
+app.use(express.static(frontendPath));
 
-// Always return frontend for unknown routes
-app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(__dirname, "../frontend/index.html")
-  );
+// ✅ FIXED CATCH-ALL (NO '*')
+app.use((req, res) => {
+  res.sendFile(path.join(frontendPath, "index.html"));
 });
 
-/* =======================
-   START SERVER
-======================= */
-const PORT = process.env.PORT || 5000;
+/* -------------------- Start Server -------------------- */
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
